@@ -55,6 +55,16 @@ const btnSecondary = {
   fontWeight:700
 }
 
+const btnDanger = {
+  background:'#7f1d1d',
+  color:'#fee2e2',
+  border:'1px solid #991b1b',
+  padding:'8px 12px',
+  borderRadius:10,
+  cursor:'pointer',
+  fontWeight:700
+}
+
 const input = {
   background:'#0d1427',
   color:'#e5e7eb',
@@ -81,9 +91,7 @@ async function apiGet(path) {
   } catch {
     data = { raw: text }
   }
-  if (!res.ok) {
-    throw new Error(data.detail || data.error || `GET ${path} failed`)
-  }
+  if (!res.ok) throw new Error(data.detail || data.error || `GET ${path} failed`)
   return data
 }
 
@@ -100,9 +108,7 @@ async function apiPost(path, body) {
   } catch {
     data = { raw: text }
   }
-  if (!res.ok) {
-    throw new Error(data.detail || data.error || `POST ${path} failed`)
-  }
+  if (!res.ok) throw new Error(data.detail || data.error || `POST ${path} failed`)
   return data
 }
 
@@ -115,20 +121,22 @@ export default function App() {
   const [selected, setSelected] = useState({})
   const [ipod, setIpod] = useState(null)
   const [ipodItems, setIpodItems] = useState([])
+  const [ipodCurrentPath, setIpodCurrentPath] = useState('')
+  const [ipodParentPath, setIpodParentPath] = useState('')
   const [ipodAudio, setIpodAudio] = useState([])
   const [ipodAudioPath, setIpodAudioPath] = useState('iPod_Control/Music')
+  const [ipodSearch, setIpodSearch] = useState('')
+  const [ipodSearchResults, setIpodSearchResults] = useState([])
   const [syncMsg, setSyncMsg] = useState('')
   const [importMsg, setImportMsg] = useState('')
   const [settings, setSettings] = useState(null)
   const [globalError, setGlobalError] = useState('')
+  const [globalInfo, setGlobalInfo] = useState('')
   const [loading, setLoading] = useState(false)
 
   const loadDashboard = async () => {
-    try {
-      setDashboard(await apiGet('/dashboard'))
-    } catch (e) {
-      setGlobalError(`Dashboard: ${e.message}`)
-    }
+    try { setDashboard(await apiGet('/dashboard')) }
+    catch (e) { setGlobalError(`Dashboard: ${e.message}`) }
   }
 
   const loadTracks = async () => {
@@ -150,17 +158,16 @@ export default function App() {
   }
 
   const loadIpod = async () => {
-    try {
-      setIpod(await apiGet('/ipod/status'))
-    } catch (e) {
-      setGlobalError(`iPod status: ${e.message}`)
-    }
+    try { setIpod(await apiGet('/ipod/status')) }
+    catch (e) { setGlobalError(`iPod status: ${e.message}`) }
   }
 
   const browseIpod = async (sub='') => {
     try {
       const data = await apiGet(`/ipod/browse?subpath=${encodeURIComponent(sub)}`)
       setIpodItems(data.items || [])
+      setIpodCurrentPath(data.current || '')
+      setIpodParentPath(data.parent || '')
     } catch (e) {
       setGlobalError(`iPod browse: ${e.message}`)
       setIpodItems([])
@@ -178,11 +185,8 @@ export default function App() {
   }
 
   const loadSettings = async () => {
-    try {
-      setSettings(await apiGet('/settings'))
-    } catch (e) {
-      setGlobalError(`Settings: ${e.message}`)
-    }
+    try { setSettings(await apiGet('/settings')) }
+    catch (e) { setGlobalError(`Settings: ${e.message}`) }
   }
 
   const refreshAll = async () => {
@@ -262,6 +266,46 @@ export default function App() {
     }
   }
 
+  const searchIpod = async () => {
+    try {
+      setGlobalError('')
+      const data = await apiGet(`/ipod/search?query=${encodeURIComponent(ipodSearch)}`)
+      setIpodSearchResults(data.items || [])
+    } catch (e) {
+      setGlobalError(`Search iPod: ${e.message}`)
+    }
+  }
+
+  const deleteIpodPath = async (relativePath) => {
+    const ok = window.confirm(`Delete this iPod item?\n\n${relativePath}`)
+    if (!ok) return
+
+    try {
+      setGlobalError('')
+      await apiPost('/ipod/delete', { relative_path: relativePath })
+      setGlobalInfo(`Deleted: ${relativePath}`)
+      await browseIpod(ipodCurrentPath)
+      await loadIpod()
+      await loadDashboard()
+      if (ipodSearchResults.length > 0) {
+        await searchIpod()
+      }
+    } catch (e) {
+      setGlobalError(`Delete from iPod: ${e.message}`)
+    }
+  }
+
+  const backupIpod = async () => {
+    try {
+      setGlobalError('')
+      setGlobalInfo('Backing up iPod...')
+      const data = await apiPost('/ipod/backup', {})
+      setGlobalInfo(`iPod backup created at: ${data.backup_path}`)
+    } catch (e) {
+      setGlobalError(`Backup iPod: ${e.message}`)
+    }
+  }
+
   return (
     <div style={{maxWidth:1200, margin:'0 auto', padding:24}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20}}>
@@ -293,15 +337,14 @@ export default function App() {
       </div>
 
       {globalError && (
-        <div style={{
-          background:'#3b1220',
-          color:'#fecdd3',
-          border:'1px solid #7f1d1d',
-          padding:'12px 14px',
-          borderRadius:12,
-          marginBottom:16
-        }}>
+        <div style={{background:'#3b1220', color:'#fecdd3', border:'1px solid #7f1d1d', padding:'12px 14px', borderRadius:12, marginBottom:16}}>
           {globalError}
+        </div>
+      )}
+
+      {globalInfo && (
+        <div style={{background:'#10243f', color:'#bfdbfe', border:'1px solid #1d4ed8', padding:'12px 14px', borderRadius:12, marginBottom:16}}>
+          {globalInfo}
         </div>
       )}
 
@@ -315,9 +358,7 @@ export default function App() {
                 <Stat label="Playlists" value={dashboard.playlist_count} />
                 <Stat label="iPod Mounted" value={dashboard.ipod_mounted} />
               </div>
-            ) : (
-              <div style={{color:'#93a4c3'}}>Dashboard data not loaded yet.</div>
-            )}
+            ) : <div style={{color:'#93a4c3'}}>Dashboard data not loaded yet.</div>}
           </Card>
 
           <Card title="Paths snapshot">
@@ -328,9 +369,7 @@ export default function App() {
                 <div><b>Export:</b> <code>{dashboard.export_path}</code></div>
                 <div><b>iPod:</b> <code>{dashboard.ipod_mount_path}</code></div>
               </div>
-            ) : (
-              <div style={{color:'#93a4c3'}}>No dashboard path data yet.</div>
-            )}
+            ) : <div style={{color:'#93a4c3'}}>No dashboard path data yet.</div>}
           </Card>
         </>
       )}
@@ -377,7 +416,7 @@ export default function App() {
 
       {tab==='ipod' && (
         <>
-          <Card title="iPod status" right={<button onClick={async()=>{await loadIpod(); await browseIpod(''); await loadIpodAudio(ipodAudioPath)}} style={btnSecondary}>Refresh</button>}>
+          <Card title="iPod status" right={<button onClick={async()=>{await loadIpod(); await browseIpod(ipodCurrentPath); await loadIpodAudio(ipodAudioPath)}} style={btnSecondary}>Refresh</button>}>
             {ipod ? (
               <div>
                 <div style={{marginBottom:8}}>Mounted: <b>{String(ipod.mounted)}</b></div>
@@ -392,15 +431,14 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{display:'flex', gap:8, marginTop:12}}>
+                <div style={{display:'flex', gap:8, marginTop:12, flexWrap:'wrap'}}>
                   <button onClick={syncToIpod} style={btn}>Sync export folder to iPod</button>
+                  <button onClick={backupIpod} style={btnSecondary}>Backup entire iPod</button>
                 </div>
 
                 <div style={{marginTop:8, color:'#93a4c3'}}>{syncMsg}</div>
               </div>
-            ) : (
-              <div style={{color:'#93a4c3'}}>No iPod status data yet.</div>
-            )}
+            ) : <div style={{color:'#93a4c3'}}>No iPod status data yet.</div>}
           </Card>
 
           <Card title="Import music from iPod to Library">
@@ -425,13 +463,57 @@ export default function App() {
             </div>
           </Card>
 
-          <Card title="Mounted iPod browser" right={<button onClick={()=>browseIpod('')} style={btnSecondary}>Refresh</button>}>
-            {ipodItems.length > 0 ? ipodItems.map(item => (
-              <div key={item.relative_path || item.name} style={{padding:'8px 0', borderBottom:'1px solid #24314d'}}>
-                {item.is_dir ? '📁' : '🎵'} {item.relative_path || item.name}{' '}
-                {!item.is_dir && <span style={{color:'#93a4c3'}}>({fmtBytes(item.size)})</span>}
-              </div>
-            )) : <div style={{color:'#93a4c3'}}>No iPod browser items yet.</div>}
+          <Card title="iPod search">
+            <div style={{display:'flex', gap:8, marginBottom:12}}>
+              <input
+                value={ipodSearch}
+                onChange={e=>setIpodSearch(e.target.value)}
+                placeholder="Search filenames on iPod"
+                style={input}
+              />
+              <button onClick={searchIpod} style={btnSecondary}>Search</button>
+            </div>
+
+            <div style={{maxHeight:220, overflow:'auto', borderTop:'1px solid #24314d', paddingTop:8}}>
+              {ipodSearchResults.length > 0 ? ipodSearchResults.map(item => (
+                <div key={item.relative_path} style={row}>
+                  <div style={{flex:1}}>
+                    🎵 {item.relative_path} <span style={{color:'#93a4c3'}}>({fmtBytes(item.size)})</span>
+                  </div>
+                  <button onClick={()=>deleteIpodPath(item.relative_path)} style={btnDanger}>Delete</button>
+                </div>
+              )) : <div style={{color:'#93a4c3'}}>No search results yet.</div>}
+            </div>
+          </Card>
+
+          <Card title="iPod explorer">
+            <div style={{display:'flex', gap:8, marginBottom:12, flexWrap:'wrap'}}>
+              <button onClick={()=>browseIpod('')} style={btnSecondary}>Root</button>
+              <button onClick={()=>browseIpod(ipodParentPath)} style={btnSecondary} disabled={ipodCurrentPath === ''}>Up</button>
+              <div style={{padding:'10px 12px', color:'#93a4c3'}}>Current: /{ipodCurrentPath}</div>
+            </div>
+
+            <div style={{maxHeight:320, overflow:'auto', borderTop:'1px solid #24314d', paddingTop:8}}>
+              {ipodItems.length > 0 ? ipodItems.map(item => (
+                <div key={item.relative_path || item.name} style={row}>
+                  <div style={{flex:1}}>
+                    {item.is_dir ? (
+                      <span style={{cursor:'pointer'}} onClick={()=>browseIpod(item.relative_path)}>
+                        📁 {item.name}
+                      </span>
+                    ) : (
+                      <span>
+                        🎵 {item.name} <span style={{color:'#93a4c3'}}>({fmtBytes(item.size)})</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <button onClick={()=>deleteIpodPath(item.relative_path)} style={btnDanger}>
+                    Delete
+                  </button>
+                </div>
+              )) : <div style={{color:'#93a4c3'}}>No iPod browser items yet.</div>}
+            </div>
           </Card>
         </>
       )}
@@ -454,9 +536,7 @@ export default function App() {
                 <Stat label="iPod path exists" value={settings.ipod_exists} />
               </div>
             </>
-          ) : (
-            <div style={{color:'#93a4c3'}}>Settings data not loaded yet.</div>
-          )}
+          ) : <div style={{color:'#93a4c3'}}>Settings data not loaded yet.</div>}
         </Card>
       )}
     </div>

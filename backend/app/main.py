@@ -1,10 +1,11 @@
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 import os
 import shutil
+import datetime
 
 app = FastAPI(title="iPod Music System API")
 
@@ -207,7 +208,15 @@ def ipod_browse(subpath: str = ""):
             }
         )
 
-    return {"items": items, "current": str(root.relative_to(IPOD)) if root != IPOD else ""}
+    parent = ""
+    if root != IPOD:
+        parent = str(root.parent.relative_to(IPOD)) if root.parent != IPOD else ""
+
+    return {
+        "items": items,
+        "current": str(root.relative_to(IPOD)) if root != IPOD else "",
+        "parent": parent,
+    }
 
 
 @app.get("/ipod/audio")
@@ -218,6 +227,31 @@ def ipod_audio(subpath: str = "iPod_Control/Music"):
 
     items = audio_files_in(root)
     return {"items": items, "count": len(items), "subpath": subpath}
+
+
+@app.get("/ipod/search")
+def ipod_search(query: str):
+    if not IPOD.exists():
+        raise HTTPException(status_code=400, detail="iPod not mounted")
+
+    q = query.strip().lower()
+    if not q:
+        return {"items": []}
+
+    results = []
+    for path in IPOD.rglob("*"):
+        if path.is_file() and q in path.name.lower():
+            results.append(
+                {
+                    "name": path.name,
+                    "relative_path": str(path.relative_to(IPOD)),
+                    "size": path.stat().st_size,
+                }
+            )
+            if len(results) >= 500:
+                break
+
+    return {"items": results}
 
 
 @app.post("/ipod/import")
@@ -254,6 +288,35 @@ def ipod_import(payload: ImportRequest):
         "source": str(source),
         "library": str(LIBRARY),
     }
+
+
+@app.post("/ipod/delete")
+def ipod_delete(relative_path: str = Body(..., embed=True)):
+    if not IPOD.exists():
+        raise HTTPException(status_code=400, detail="iPod not mounted")
+
+    target = safe_resolve(IPOD, relative_path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File or folder not found")
+
+    if target.is_file():
+        target.unlink()
+    else:
+        shutil.rmtree(target)
+
+    return {"ok": True, "deleted": relative_path}
+
+
+@app.post("/ipod/backup")
+def ipod_backup():
+    if not IPOD.exists():
+        raise HTTPException(status_code=400, detail="iPod not mounted")
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = LIBRARY / f"_ipod_backup_{timestamp}"
+
+    shutil.copytree(IPOD, backup_dir)
+    return {"ok": True, "backup_path": str(backup_dir)}
 
 
 @app.post("/ipod/sync")
