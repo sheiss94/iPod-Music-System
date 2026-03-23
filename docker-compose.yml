@@ -1,0 +1,36 @@
+services:
+  api:
+    build: ./backend
+    container_name: ipod_music_api
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      - MUSIC_LIBRARY_PATH=${MUSIC_LIBRARY_PATH}
+      - MUSIC_INCOMING_PATH=${MUSIC_INCOMING_PATH}
+      - MUSIC_EXPORT_PATH=${MUSIC_EXPORT_PATH}
+      - IPOD_MOUNT_PATH=${IPOD_MOUNT_PATH}
+    volumes:
+      - ./backend/app:/app/app
+      - ${MUSIC_LIBRARY_PATH}:${MUSIC_LIBRARY_PATH}
+      - ${MUSIC_INCOMING_PATH}:${MUSIC_INCOMING_PATH}
+      - ${MUSIC_EXPORT_PATH}:${MUSIC_EXPORT_PATH}
+      - ${IPOD_MOUNT_PATH}:${IPOD_MOUNT_PATH}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  web:
+    build: ./frontend
+    container_name: ipod_music_web
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:8001
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/vite.config.js:/app/vite.config.js
+    depends_on:
+      - api
+    command: npm run dev -- --host 0.0.0.0
